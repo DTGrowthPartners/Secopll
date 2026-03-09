@@ -19,7 +19,13 @@ import { formatCOPFull, formatDate } from "@/lib/utils";
 import RelevanceScore from "@/components/RelevanceScore";
 import CategoryBadge from "@/components/CategoryBadge";
 
-const STATUS_OPTIONS = [
+type InternalStatus = "new" | "reviewing" | "applied" | "discarded";
+
+const STATUS_OPTIONS: {
+  value: InternalStatus;
+  label: string;
+  color: string;
+}[] = [
   { value: "new", label: "Nuevo", color: "bg-blue-500" },
   { value: "reviewing", label: "En revision", color: "bg-yellow-500" },
   { value: "applied", label: "Aplicado", color: "bg-green-500" },
@@ -64,7 +70,6 @@ export default function ContractDetailPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      {/* Back button */}
       <button
         onClick={() => router.push("/")}
         className="mb-4 flex items-center gap-1 text-sm text-[#a3a3a3] hover:text-[#ededed]"
@@ -73,7 +78,6 @@ export default function ContractDetailPage() {
         Volver al dashboard
       </button>
 
-      {/* Header */}
       <div className="rounded-lg border border-[#262626] bg-[#141414] p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -95,7 +99,6 @@ export default function ContractDetailPage() {
           <p className="mt-2 text-sm text-[#a3a3a3]">{contract.description}</p>
         )}
 
-        {/* AI Reason */}
         {contract.classification_reason && (
           <div className="mt-4 flex items-start gap-2 rounded bg-[#1a1a2e] p-3">
             <Bot size={16} className="mt-0.5 shrink-0 text-brand-blue" />
@@ -106,7 +109,6 @@ export default function ContractDetailPage() {
         )}
       </div>
 
-      {/* Details grid */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DetailCard
           icon={<Building2 size={16} />}
@@ -145,7 +147,6 @@ export default function ContractDetailPage() {
         />
       </div>
 
-      {/* Status + Actions */}
       <div className="mt-4 rounded-lg border border-[#262626] bg-[#141414] p-6">
         <h2 className="mb-3 text-sm font-semibold">Estado interno</h2>
 
@@ -173,7 +174,6 @@ export default function ContractDetailPage() {
           ))}
         </div>
 
-        {/* Assigned to */}
         <div className="mt-4">
           <label className="mb-1.5 block text-xs text-[#a3a3a3]">
             Asignado a
@@ -187,7 +187,6 @@ export default function ContractDetailPage() {
           />
         </div>
 
-        {/* Notes */}
         <div className="mt-4">
           <label className="mb-1.5 block text-xs text-[#a3a3a3]">Notas</label>
           <textarea
@@ -208,7 +207,6 @@ export default function ContractDetailPage() {
         </div>
       </div>
 
-      {/* SECOP link */}
       {contract.secop_url && !isPrivateUrl && (
         <div className="mt-4">
           <a
