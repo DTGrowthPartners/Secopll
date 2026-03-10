@@ -32,12 +32,18 @@ async def list_contracts(
 
     filters = []
 
+    # By default, exclude contracts that are already awarded/closed
+    EXCLUDED_STATUSES = ["Cerrado", "Celebrado", "Liquidado", "Terminado", "Adjudicado"]
+
     if min_score > 0:
         filters.append(Contract.relevance_score >= min_score)
     if service_category:
         filters.append(Contract.dt_service_category == service_category)
     if status:
         filters.append(Contract.status == status)
+    else:
+        # When no status filter specified, exclude awarded/closed contracts
+        filters.append(~Contract.status.in_(EXCLUDED_STATUSES))
     if department:
         filters.append(Contract.department == department)
     if date_from:

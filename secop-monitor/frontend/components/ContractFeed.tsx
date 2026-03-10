@@ -10,7 +10,7 @@ export default function ContractFeed() {
   const [filters, setFilters] = useState<ContractFilters>({
     page: 1,
     limit: 20,
-    min_score: 0,
+    min_score: 40,
   });
 
   const { data, isLoading, isError } = useContracts(filters);

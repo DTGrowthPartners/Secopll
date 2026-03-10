@@ -66,16 +66,31 @@ def _normalize_duration(duration: str | None, unit: str | None) -> int | None:
 
 
 def _should_skip(record: dict, source: str) -> bool:
-    """Skip contracts with value 0 and closed status."""
+    """Skip contracts that are already awarded, signed, or closed."""
     if source == "SECOP_II":
         value = _parse_int(record.get("precio_base"))
         status = (record.get("estado_de_apertura_del_proceso") or "").upper()
-        if value == 0 and status == "CERRADO":
+        phase = (record.get("fase") or "").upper()
+        # Only keep open processes that are not yet awarded
+        if status == "CERRADO":
+            return True
+        if value == 0:
+            return True
+        # Skip if phase indicates already awarded or in execution
+        skip_phases = {"ADJUDICADO", "CELEBRADO", "EN EJECUCION", "EN EJECUCIÓN",
+                       "TERMINADO", "LIQUIDADO", "ADJUDICACIÓN"}
+        if phase in skip_phases:
             return True
     elif source == "SECOP_I":
         value = _parse_int(record.get("valor_del_contrato"))
         status = (record.get("estado_contrato") or "").upper()
-        if value == 0 and "CERRADO" in status:
+        # Skip contracts already signed, liquidated or finished
+        skip_statuses = {"CELEBRADO", "LIQUIDADO", "TERMINADO", "CERRADO",
+                         "TERMINADO ANORMALMENTE DESPUES DE CONVOCADO",
+                         "TERMINADO SIN LIQUIDAR", "ADJUDICADO"}
+        if status in skip_statuses or any(s in status for s in skip_statuses):
+            return True
+        if value == 0:
             return True
     return False
 
@@ -258,8 +273,7 @@ async def sync_secop(source: str = "SECOP_II") -> dict:
                         passed, _matches = passes_prefilter(mapped["title"], mapped["description"])
                         if passed:
                             prefiltered.append(mapped)
-
-                        batch_to_upsert.append(mapped)
+                            batch_to_upsert.append(mapped)
 
                     new_count, updated_count = await _upsert_contracts(db, batch_to_upsert)
                     total_new += new_count
