@@ -90,14 +90,20 @@ def _is_person_name(title: str) -> bool:
     return False
 
 
+def _has_provider_assigned(record: dict) -> bool:
+    """Check if a SECOP II record already has a provider assigned."""
+    provider = (record.get("nombre_del_proveedor") or "").strip()
+    return provider not in ("", "No Definido")
+
+
 def _should_skip(record: dict, source: str) -> bool:
-    """Skip contracts that are already awarded, signed, or closed."""
+    """Skip contracts that are already awarded, signed, closed, or have a provider."""
     if source == "SECOP_II":
         value = _parse_int(record.get("precio_base"))
         status = (record.get("estado_de_apertura_del_proceso") or "").upper()
         phase = (record.get("fase") or "").upper()
         title = record.get("nombre_del_procedimiento", "")
-        # Only keep open processes that are not yet awarded
+        # Skip closed processes
         if status == "CERRADO":
             return True
         if value == 0:
@@ -106,6 +112,9 @@ def _should_skip(record: dict, source: str) -> bool:
         skip_phases = {"ADJUDICADO", "CELEBRADO", "EN EJECUCION", "EN EJECUCIÓN",
                        "TERMINADO", "LIQUIDADO", "ADJUDICACIÓN"}
         if phase in skip_phases:
+            return True
+        # Skip if provider is already assigned (the key filter!)
+        if _has_provider_assigned(record):
             return True
         # Skip direct contracts where title is just the provider's name
         if _is_person_name(title):
@@ -122,7 +131,6 @@ def _should_skip(record: dict, source: str) -> bool:
             return True
         if value == 0:
             return True
-        # Skip direct contracts where title is just the provider's name
         if _is_person_name(title):
             return True
     return False
