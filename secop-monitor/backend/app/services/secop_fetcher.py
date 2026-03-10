@@ -68,15 +68,13 @@ def _normalize_duration(duration: str | None, unit: str | None) -> int | None:
 def _is_person_name(title: str) -> bool:
     """Detect if title is just a person/company name (already awarded contract)."""
     title = title.strip()
-    # Person names are typically 2-5 uppercase words with no descriptive verbs
     words = title.split()
     if len(words) < 2 or len(words) > 6:
         return False
-    # If title has no lowercase and no service-related words, it's likely a name
     service_indicators = [
         "PRESTACIÓN", "PRESTACION", "CONTRATO", "SERVICIO", "ADQUISICION",
         "ADQUISICIÓN", "CONSULTORÍA", "CONSULTORIA", "DESARROLLO", "MANTENIMIENTO",
-        "SOPORTE", "DISEÑO", "DISEÑO", "ELABORACIÓN", "ELABORACION", "SUMINISTRO",
+        "SOPORTE", "DISEÑO", "ELABORACIÓN", "ELABORACION", "SUMINISTRO",
         "COMPRA", "ARRIENDO", "OBRA", "INTERVENTORÍA", "INTERVENTORIA", "REALIZAR",
         "BRINDAR", "PRESTAR", "DIVULGACIÓN", "DIVULGACION", "VIGILANCIA",
         "INFRAESTRUCTURA", "SOFTWARE", "MARKETING", "DIGITAL",
@@ -84,7 +82,6 @@ def _is_person_name(title: str) -> bool:
     title_upper = title.upper()
     if any(word in title_upper for word in service_indicators):
         return False
-    # Check if it looks like a name (all words capitalized, no numbers, short)
     if len(title) < 60 and all(w[0].isupper() for w in words if w):
         return True
     return False
@@ -103,27 +100,22 @@ def _should_skip(record: dict, source: str) -> bool:
         status = (record.get("estado_de_apertura_del_proceso") or "").upper()
         phase = (record.get("fase") or "").upper()
         title = record.get("nombre_del_procedimiento", "")
-        # Skip closed processes
         if status == "CERRADO":
             return True
         if value == 0:
             return True
-        # Skip if phase indicates already awarded or in execution
         skip_phases = {"ADJUDICADO", "CELEBRADO", "EN EJECUCION", "EN EJECUCIÓN",
                        "TERMINADO", "LIQUIDADO", "ADJUDICACIÓN"}
         if phase in skip_phases:
             return True
-        # Skip if provider is already assigned (the key filter!)
         if _has_provider_assigned(record):
             return True
-        # Skip direct contracts where title is just the provider's name
         if _is_person_name(title):
             return True
     elif source == "SECOP_I":
         value = _parse_int(record.get("valor_del_contrato"))
         status = (record.get("estado_contrato") or "").upper()
         title = record.get("objeto_del_contrato", "")
-        # Skip contracts already signed, liquidated or finished
         skip_statuses = {"CELEBRADO", "LIQUIDADO", "TERMINADO", "CERRADO",
                          "TERMINADO ANORMALMENTE DESPUES DE CONVOCADO",
                          "TERMINADO SIN LIQUIDAR", "ADJUDICADO"}
@@ -205,17 +197,6 @@ async def _fetch_page(
     return []
 
 
-async def _get_last_sync_timestamp(db: AsyncSession, source: str) -> datetime | None:
-    result = await db.execute(
-        select(SyncLog.finished_at)
-        .where(SyncLog.source == source, SyncLog.status == "success")
-        .order_by(SyncLog.finished_at.desc())
-        .limit(1)
-    )
-    row = result.scalar_one_or_none()
-    return row
-
-
 async def _upsert_contracts(db: AsyncSession, contracts_data: list[dict]) -> tuple[int, int]:
     """Upsert contracts into DB using bulk insert. Returns (new_count, updated_count)."""
     if not contracts_data:
@@ -257,8 +238,73 @@ async def _upsert_contracts(db: AsyncSession, contracts_data: list[dict]) -> tup
     return total, 0
 
 
+# Search terms to query SECOP API directly (targeted keyword search)
+SEARCH_TERMS = [
+    "marketing digital",
+    "redes sociales",
+    "pagina web",
+    "página web",
+    "sitio web",
+    "portal web",
+    "desarrollo web",
+    "diseño web",
+    "landing page",
+    "e-commerce",
+    "ecommerce",
+    "tienda virtual",
+    "inteligencia artificial",
+    "chatbot",
+    "whatsapp",
+    "facebook ads",
+    "instagram ads",
+    "meta ads",
+    "google ads",
+    "publicidad digital",
+    "pauta digital",
+    "community manager",
+    "social media",
+    "contenidos digitales",
+    "branding digital",
+    "transformación digital",
+    "transformacion digital",
+    "consultoría digital",
+    "consultoria digital",
+    "estrategia digital",
+    "automatización de procesos",
+    "automatizacion de procesos",
+    "software web",
+    "aplicación web",
+    "aplicacion web",
+    "plataforma web",
+    "bot conversacional",
+    "posicionamiento web",
+    "posicionamiento digital",
+    "mercadeo digital",
+]
+
+
+def _build_keyword_where(keyword: str, source: str) -> str:
+    """Build a SECOP where clause for a specific keyword search."""
+    escaped = keyword.replace("'", "''")
+    if source == "SECOP_II":
+        return (
+            f"(UPPER(nombre_del_procedimiento) LIKE UPPER('%{escaped}%') "
+            f"OR UPPER(descripci_n_del_procedimiento) LIKE UPPER('%{escaped}%')) "
+            f"AND estado_de_apertura_del_proceso = 'Abierto' "
+            f"AND nombre_del_proveedor = 'No Definido' "
+            f"AND precio_base > 0"
+        )
+    else:
+        return (
+            f"(UPPER(objeto_del_contrato) LIKE UPPER('%{escaped}%') "
+            f"OR UPPER(detalle_del_objeto_a_contratar) LIKE UPPER('%{escaped}%')) "
+            f"AND estado_contrato = 'Activo' "
+            f"AND valor_del_contrato > 0"
+        )
+
+
 async def sync_secop(source: str = "SECOP_II") -> dict:
-    """Main sync function for a given SECOP source."""
+    """Main sync — searches SECOP by each DT keyword for open unawarded processes."""
     is_secop_ii = source == "SECOP_II"
     base_url = settings.secop_ii_url if is_secop_ii else settings.secop_i_url
     mapper = _map_secop_ii if is_secop_ii else _map_secop_i
@@ -271,79 +317,77 @@ async def sync_secop(source: str = "SECOP_II") -> dict:
         await db.refresh(sync_log)
 
         try:
-            last_sync = await _get_last_sync_timestamp(db, source)
-            if last_sync is None:
-                last_sync = datetime.utcnow() - timedelta(days=settings.backfill_days)
-                logger.info("No previous sync for %s — backfilling %d days", source, settings.backfill_days)
-
-            last_sync_str = last_sync.strftime("%Y-%m-%dT%H:%M:%S")
-            where_clause = f"{date_field} > '{last_sync_str}'"
-
             total_fetched = 0
             total_new = 0
-            total_updated = 0
-            offset = 0
-            prefiltered: list[dict] = []
+            seen_ids: set[str] = set()
+            all_prefiltered: list[dict] = []
 
             async with httpx.AsyncClient() as client:
-                while True:
-                    params = {
-                        "$where": where_clause,
-                        "$order": f"{date_field} DESC",
-                        "$limit": BATCH_SIZE,
-                        "$offset": offset,
-                    }
+                for term in SEARCH_TERMS:
+                    where_clause = _build_keyword_where(term, source)
+                    offset = 0
 
-                    logger.info("Fetching %s offset=%d", source, offset)
-                    records = await _fetch_page(client, base_url, params)
+                    while True:
+                        params = {
+                            "$where": where_clause,
+                            "$order": f"{date_field} DESC",
+                            "$limit": BATCH_SIZE,
+                            "$offset": offset,
+                        }
 
-                    if not records:
-                        break
+                        logger.info("Fetching %s keyword='%s' offset=%d", source, term, offset)
+                        records = await _fetch_page(client, base_url, params)
 
-                    total_fetched += len(records)
-                    batch_to_upsert: list[dict] = []
+                        if not records:
+                            break
 
-                    for record in records:
-                        if _should_skip(record, source):
-                            continue
+                        total_fetched += len(records)
+                        batch_to_upsert: list[dict] = []
 
-                        mapped = mapper(record)
-                        if not mapped["secop_id"] or not mapped["title"]:
-                            continue
+                        for record in records:
+                            if _should_skip(record, source):
+                                continue
 
-                        passed, _matches = passes_prefilter(mapped["title"], mapped["description"])
-                        if passed:
-                            prefiltered.append(mapped)
-                            batch_to_upsert.append(mapped)
+                            mapped = mapper(record)
+                            if not mapped["secop_id"] or not mapped["title"]:
+                                continue
 
-                    new_count, updated_count = await _upsert_contracts(db, batch_to_upsert)
-                    total_new += new_count
-                    total_updated += updated_count
+                            # Deduplicate across keyword searches
+                            if mapped["secop_id"] in seen_ids:
+                                continue
+                            seen_ids.add(mapped["secop_id"])
 
-                    if len(records) < BATCH_SIZE:
-                        break
+                            passed, _matches = passes_prefilter(mapped["title"], mapped["description"])
+                            if passed:
+                                all_prefiltered.append(mapped)
+                                batch_to_upsert.append(mapped)
 
-                    offset += BATCH_SIZE
+                        new_count, _ = await _upsert_contracts(db, batch_to_upsert)
+                        total_new += new_count
+
+                        if len(records) < BATCH_SIZE:
+                            break
+                        offset += BATCH_SIZE
 
             sync_log.records_fetched = total_fetched
             sync_log.records_new = total_new
-            sync_log.records_updated = total_updated
+            sync_log.records_updated = 0
             sync_log.status = "success"
             sync_log.finished_at = datetime.utcnow()
             await db.commit()
 
             logger.info(
-                "Sync %s completed: fetched=%d, new=%d, updated=%d, prefiltered=%d",
-                source, total_fetched, total_new, total_updated, len(prefiltered),
+                "Sync %s completed: fetched=%d, unique=%d, saved=%d",
+                source, total_fetched, len(seen_ids), len(all_prefiltered),
             )
 
             return {
                 "source": source,
                 "fetched": total_fetched,
                 "new": total_new,
-                "updated": total_updated,
-                "prefiltered_for_ai": len(prefiltered),
-                "prefiltered_secop_ids": [c["secop_id"] for c in prefiltered],
+                "updated": 0,
+                "prefiltered_for_ai": len(all_prefiltered),
+                "prefiltered_secop_ids": [c["secop_id"] for c in all_prefiltered],
             }
 
         except Exception as exc:
