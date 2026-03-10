@@ -65,12 +65,38 @@ def _normalize_duration(duration: str | None, unit: str | None) -> int | None:
     return days
 
 
+def _is_person_name(title: str) -> bool:
+    """Detect if title is just a person/company name (already awarded contract)."""
+    title = title.strip()
+    # Person names are typically 2-5 uppercase words with no descriptive verbs
+    words = title.split()
+    if len(words) < 2 or len(words) > 6:
+        return False
+    # If title has no lowercase and no service-related words, it's likely a name
+    service_indicators = [
+        "PRESTACIÓN", "PRESTACION", "CONTRATO", "SERVICIO", "ADQUISICION",
+        "ADQUISICIÓN", "CONSULTORÍA", "CONSULTORIA", "DESARROLLO", "MANTENIMIENTO",
+        "SOPORTE", "DISEÑO", "DISEÑO", "ELABORACIÓN", "ELABORACION", "SUMINISTRO",
+        "COMPRA", "ARRIENDO", "OBRA", "INTERVENTORÍA", "INTERVENTORIA", "REALIZAR",
+        "BRINDAR", "PRESTAR", "DIVULGACIÓN", "DIVULGACION", "VIGILANCIA",
+        "INFRAESTRUCTURA", "SOFTWARE", "MARKETING", "DIGITAL",
+    ]
+    title_upper = title.upper()
+    if any(word in title_upper for word in service_indicators):
+        return False
+    # Check if it looks like a name (all words capitalized, no numbers, short)
+    if len(title) < 60 and all(w[0].isupper() for w in words if w):
+        return True
+    return False
+
+
 def _should_skip(record: dict, source: str) -> bool:
     """Skip contracts that are already awarded, signed, or closed."""
     if source == "SECOP_II":
         value = _parse_int(record.get("precio_base"))
         status = (record.get("estado_de_apertura_del_proceso") or "").upper()
         phase = (record.get("fase") or "").upper()
+        title = record.get("nombre_del_procedimiento", "")
         # Only keep open processes that are not yet awarded
         if status == "CERRADO":
             return True
@@ -81,9 +107,13 @@ def _should_skip(record: dict, source: str) -> bool:
                        "TERMINADO", "LIQUIDADO", "ADJUDICACIÓN"}
         if phase in skip_phases:
             return True
+        # Skip direct contracts where title is just the provider's name
+        if _is_person_name(title):
+            return True
     elif source == "SECOP_I":
         value = _parse_int(record.get("valor_del_contrato"))
         status = (record.get("estado_contrato") or "").upper()
+        title = record.get("objeto_del_contrato", "")
         # Skip contracts already signed, liquidated or finished
         skip_statuses = {"CELEBRADO", "LIQUIDADO", "TERMINADO", "CERRADO",
                          "TERMINADO ANORMALMENTE DESPUES DE CONVOCADO",
@@ -91,6 +121,9 @@ def _should_skip(record: dict, source: str) -> bool:
         if status in skip_statuses or any(s in status for s in skip_statuses):
             return True
         if value == 0:
+            return True
+        # Skip direct contracts where title is just the provider's name
+        if _is_person_name(title):
             return True
     return False
 

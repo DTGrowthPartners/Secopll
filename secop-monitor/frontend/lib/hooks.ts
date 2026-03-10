@@ -92,6 +92,11 @@ export function useTriggerSync() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["syncStatus"] });
+      // Refresh contracts and dashboard after sync starts
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["contracts"] });
+        qc.invalidateQueries({ queryKey: ["dashboard"] });
+      }, 5000);
     },
   });
 }
