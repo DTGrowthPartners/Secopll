@@ -292,13 +292,16 @@ SEARCH_TERMS = [
 def _build_keyword_where(keyword: str, source: str) -> str:
     """Build a SECOP where clause for a specific keyword search."""
     escaped = keyword.replace("'", "''")
+    # Only fetch processes published in the last 12 months
+    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%S")
     if source == "SECOP_II":
         return (
             f"(UPPER(nombre_del_procedimiento) LIKE UPPER('%{escaped}%') "
             f"OR UPPER(descripci_n_del_procedimiento) LIKE UPPER('%{escaped}%')) "
             f"AND estado_de_apertura_del_proceso = 'Abierto' "
             f"AND nombre_del_proveedor = 'No Definido' "
-            f"AND precio_base > 0"
+            f"AND precio_base > 0 "
+            f"AND fecha_de_ultima_publicaci > '{cutoff}'"
         )
     else:
         return (

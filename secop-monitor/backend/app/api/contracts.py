@@ -68,7 +68,7 @@ async def list_contracts(
     total = total_result.scalar_one()
 
     offset = (page - 1) * limit
-    query = query.order_by(Contract.relevance_score.desc(), Contract.published_at.desc())
+    query = query.order_by(Contract.published_at.desc(), Contract.relevance_score.desc())
     query = query.offset(offset).limit(limit)
 
     result = await db.execute(query)
