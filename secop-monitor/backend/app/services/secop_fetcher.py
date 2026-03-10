@@ -100,9 +100,15 @@ def _should_skip(record: dict, source: str) -> bool:
         status = (record.get("estado_de_apertura_del_proceso") or "").upper()
         phase = (record.get("fase") or "").upper()
         title = record.get("nombre_del_procedimiento", "")
+        modality = (record.get("modalidad_de_contratacion") or "").lower()
         if status == "CERRADO":
             return True
         if value == 0:
+            return True
+        # Skip non-competitive modalities (direct contracting)
+        skip_modalities = {"contratación régimen especial", "contratación directa",
+                           "contratacion regimen especial", "contratacion directa"}
+        if modality in skip_modalities:
             return True
         skip_phases = {"ADJUDICADO", "CELEBRADO", "EN EJECUCION", "EN EJECUCIÓN",
                        "TERMINADO", "LIQUIDADO", "ADJUDICACIÓN"}
